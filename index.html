@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>OpenStreetMap + Firebase Realtime</title>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.css" />
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.js"></script>
+    <script>
+      const firebaseURL = "https://navigasyon-ffc0c-default-rtdb.firebaseio.com/locations.json";
+      let map;
+      let markers = {};
+      let selectedMarker = null;
+      let routingControl = null;
+      let travelMode = 'walking';
+      let userMarker = null;
+
+      function initMap() {
+        map = L.map("map").setView([39.92, 32.85], 6);
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          attribution: "© OpenStreetMap contributors",
+        }).addTo(map);
+        fetchLocations();
+        trackUserLocation();
+      }
+
+      function fetchLocations() {
+        fetch(firebaseURL)
+          .then((response) => response.json())
+          .then((data) => {
+            if (data) {
+              Object.keys(data).forEach((key) => {
+                let { latitude, longitude, type } = data[key];
+                if (!markers[key]) {
+                  let iconURL = type === "erzak"
+                    ? "https://cdn-icons-png.flaticon.com/512/1046/1046784.png"
+                    : "https://cdn-icons-png.flaticon.com/128/13365/13365621.png";
+
+                  let customIcon = L.divIcon({
+                    className: "custom-marker",
+                    html: `<img src="${iconURL}" width="30" height="30">`,
+                    iconSize: [30, 30],
+                    iconAnchor: [15, 30],
+                  });
+
+                  let marker = L.marker([latitude, longitude], { icon: customIcon })
+                    .addTo(map)
+                    .bindPopup(`<b>Tür:</b> ${type}<br>Konum: ${latitude}, ${longitude}<br><button onclick="startRoute(${latitude}, ${longitude})">Rota Oluştur</button>`);
+
+                  markers[key] = marker;
+                }
+              });
+            }
+          })
+          .catch((error) => console.error("Firebase verisi alınamadı:", error));
+      }
+
+      function trackUserLocation() {
+        if (!navigator.geolocation) {
+          alert("Tarayıcınız konum takibini desteklemiyor.");
+          return;
+        }
+        navigator.geolocation.watchPosition(
+          (position) => {
+            let { latitude, longitude } = position.coords;
+            if (!userMarker) {
+              userMarker = L.marker([latitude, longitude], { color: "blue" }).addTo(map);
+            } else {
+              userMarker.setLatLng([latitude, longitude]);
+            }
+            map.setView([latitude, longitude], 14);
+          },
+          (error) => {
+            console.error("Konum alınamadı:", error);
+          }
+        );
+      }
+
+      function startRoute(endLat, endLng) {
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            drawRoute(position.coords.latitude, position.coords.longitude, endLat, endLng);
+          },
+          (error) => {
+            alert("Konum alınamadı. Lütfen konum erişimine izin verin.");
+          }
+        );
+      }
+
+      function drawRoute(startLat, startLng, endLat, endLng) {
+        if (routingControl) {
+          map.removeControl(routingControl);
+        }
+        routingControl = L.Routing.control({
+          waypoints: [
+            L.latLng(startLat, startLng),
+            L.latLng(endLat, endLng),
+          ],
+          routeWhileDragging: true,
+          show: true,
+          addWaypoints: false,
+          router: L.Routing.osrmv1({
+            serviceUrl: 'https://router.project-osrm.org/route/v1',
+          }),
+        }).addTo(map);
+      }
+
+      function deleteSelectedMarker() {
+        if (selectedMarker) {
+          let deleteURL = `https://navigasyon-ffc0c-default-rtdb.firebaseio.com/locations/${selectedMarker.key}.json`;
+          fetch(deleteURL, { method: "DELETE" })
+            .then(() => {
+              map.removeLayer(markers[selectedMarker.key]);
+              delete markers[selectedMarker.key];
+              selectedMarker = null;
+            })
+            .catch((error) => console.error("Marker silinemedi:", error));
+        } else {
+          alert("Silmek için önce bir marker seçmelisiniz!");
+        }
+      }
+    </script>
+    <style>
+      #map {
+        height: 500px;
+        width: 100%;
+      }
+    </style>
+  </head>
+  <body onload="initMap()">
+    <h1>OpenStreetMap + Firebase Realtime</h1>
+    <div id="map"></div>
+    <select onchange="travelMode = this.value">
+      <option value="walking">Yürüyüş</option>
+      <option value="driving">Araç</option>
+      <option value="cycling">Bisiklet</option>
+    </select>
+    <button onclick="deleteSelectedMarker()">Seçili Marker’ı Sil</button>
+  </body>
+</html>
